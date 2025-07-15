@@ -153,17 +153,26 @@ def fetch_youtube_transcript_text(video_id, asr=True):
                 for segment in initial_segments:
                     if 'transcriptSegmentRenderer' in segment:
                         seg_data = segment['transcriptSegmentRenderer']
-                        # Extract text from all runs
+                        
+                        # Extract start time and text
+                        start_time = seg_data.get('startTimeText', {}).get('simpleText', '')
                         text = seg_data['snippet']['runs'][0]['text']
-                        all_text.append(text)
+                        
+                        # Format as [Time] transcript
+                        if start_time:
+                            formatted_segment = f"[{start_time}] {text}"
+                        else:
+                            formatted_segment = text
+                            
+                        all_text.append(formatted_segment)
                 
                 break
                 
     except (KeyError, IndexError) as e:
         raise Exception(f"Failed to parse transcript data: {str(e)}")
     
-    # Join all text with spaces
-    return ' '.join(all_text)
+    # Join all text with newlines for better readability
+    return '\n'.join(all_text)
 
 # Command Line Interface
 if __name__ == "__main__":
