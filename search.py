@@ -1,6 +1,7 @@
 import requests
 import json
 import argparse
+import sys
 
 def search_youtube_videos(query, continuation=None):
     """
@@ -65,11 +66,42 @@ def search_youtube_videos(query, continuation=None):
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code != 200:
-            print(f"Error: HTTP {response.status_code}\nResponse: {response.text}")
+            print(f"Error: HTTP {response.status_code}\nResponse: {response.text}", file=sys.stderr)
             return None
         return response.json()
     except Exception as e:
-        print(f"Request failed: {str(e)}")
+        print(f"Request failed: {str(e)}", file=sys.stderr)
+        return None
+
+def parse_view_count(vc_text):
+    """
+    Parses view count text (e.g., "1.2M views", "1,234 views", "No views") into an integer.
+    """
+    if not vc_text:
+        return None
+    
+    # "No views" case
+    if vc_text.lower().startswith("no"):
+        return 0
+    
+    # Take first part which should be the number
+    num_part = vc_text.split(' ')[0]
+    num_part = num_part.replace(',', '')
+    
+    multiplier = 1
+    if num_part.lower().endswith('k'):
+        multiplier = 1000
+        num_part = num_part[:-1]
+    elif num_part.lower().endswith('m'):
+        multiplier = 1_000_000
+        num_part = num_part[:-1]
+    elif num_part.lower().endswith('b'):
+        multiplier = 1_000_000_000
+        num_part = num_part[:-1]
+        
+    try:
+        return int(float(num_part) * multiplier)
+    except ValueError:
         return None
 
 def extract_videos(response_data, exclude_shorts=False):
@@ -83,7 +115,7 @@ def extract_videos(response_data, exclude_shorts=False):
         try:
             contents = response_data['contents']['twoColumnSearchResultsRenderer']['primaryContents']['sectionListRenderer']['contents']
         except (KeyError, IndexError):
-            print("Could not find video content in the response.")
+            print("Could not find video content in the response.", file=sys.stderr)
             return videos
 
     video_contents = []
@@ -107,10 +139,15 @@ def extract_videos(response_data, exclude_shorts=False):
             
             video_id = renderer.get('videoId')
             title = renderer.get('title', {}).get('runs', [{}])[0].get('text')
-            view_count = renderer.get('viewCountText', {}).get('simpleText')
+            view_count_text = renderer.get('viewCountText', {}).get('simpleText')
+            view_count = parse_view_count(view_count_text)
+            try:
+                channel_name = renderer['ownerText']['runs'][0]['text']
+            except (KeyError, IndexError):
+                channel_name = None
 
             if video_id and title:
-                videos.append({"title": title, "view_count": view_count, "video_id": video_id})
+                videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id})
     return videos
 
 def extract_continuation_token(response_data):
@@ -136,25 +173,21 @@ def extract_continuation_token(response_data):
     return None
 
 def print_videos_info(videos):
-    """Prints formatted video information."""
-    print("--- Extracted Video Information ---")
-    print("Title, View Count, Video ID")
-    print("---------------------------------")
-    for video in videos:
-        print(f'"{video["title"]}", "{video.get("view_count", "N/A")}", "{video["video_id"]}"')
+    """Prints formatted video information as a JSON array."""
+    print(json.dumps(videos, indent=2, ensure_ascii=False))
 
 def parse_filter_renderers(response_data):
     """
     Parses searchFilterRenderer objects from the YouTube search response.
     """
     try:
-        print("\n--- Extracted Filter Information ---")
+        print("\n--- Extracted Filter Information ---", file=sys.stderr)
         groups = response_data['header']['searchHeaderRenderer']['searchFilterButton']['buttonRenderer']['command']['openPopupAction']['popup']['searchFilterOptionsDialogRenderer']['groups']
         for group in groups:
             group_renderer = group.get('searchFilterGroupRenderer', {})
             title = group_renderer.get('title', {}).get('simpleText')
             if title:
-                print(f"\n{title}:")
+                print(f"\n{title}:", file=sys.stderr)
             
             for f in group_renderer.get('filters', []):
                 renderer = f.get('searchFilterRenderer', {})
@@ -162,10 +195,10 @@ def parse_filter_renderers(response_data):
                 params = renderer.get('navigationEndpoint', {}).get('searchEndpoint', {}).get('params')
                 if tooltip:
                     status = "(selected)" if renderer.get('status') == 'FILTER_STATUS_SELECTED' else params
-                    print(f"  {tooltip}: {status}")
+                    print(f"  {tooltip}: {status}", file=sys.stderr)
 
     except (KeyError, IndexError, TypeError) as e:
-        print(f"An error occurred while parsing filter renderers: {e}")
+        print(f"An error occurred while parsing filter renderers: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Search YouTube videos')
@@ -174,26 +207,28 @@ if __name__ == "__main__":
     parser.add_argument('--results', type=int, default=10, help='Number of results to fetch')
     args = parser.parse_args()
     
-    print(f"Searching YouTube for: '{args.query}' | Aiming for {args.results} results.\n")
+    print(f"Searching YouTube for: '{args.query}' | Aiming for {args.results} results.", file=sys.stderr)
     
     all_videos = []
     response_data = search_youtube_videos(args.query)
 
     if response_data:
+        # Save initial response for debugging
         try:
             with open('response.txt', 'w', encoding='utf-8') as f:
                 json.dump(response_data, f, indent=2, ensure_ascii=False)
-            print("Full response from initial search saved to response.txt\n")
+            print("Full response from initial search saved to response.txt", file=sys.stderr)
         except Exception as e:
-            print(f"Failed to save response to file: {e}")
+            print(f"Failed to save response to file: {e}", file=sys.stderr)
 
         all_videos.extend(extract_videos(response_data, args.exclude_shorts))
         continuation_token = extract_continuation_token(response_data)
         
-        parse_filter_renderers(response_data)
+        # We no longer print filter information to keep stdout clean for JSON
+        # parse_filter_renderers(response_data)
 
         while len(all_videos) < args.results and continuation_token:
-            print(f"\nCollected {len(all_videos)} videos, fetching more...")
+            print(f"Collected {len(all_videos)} videos, fetching more...", file=sys.stderr)
             response_data = search_youtube_videos(args.query, continuation=continuation_token)
             if not response_data:
                 break
@@ -203,7 +238,6 @@ if __name__ == "__main__":
 
         print_videos_info(all_videos[:args.results])
     else:
-        print("Failed to get search results")
-        exit(1)
-    
+        print("Failed to get search results", file=sys.stderr)
+        
     exit(0) 
