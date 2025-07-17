@@ -25,6 +25,37 @@ def extract_video_id(youtube_url):
             return match.group(1)
     raise ValueError(f"Could not extract video ID from URL: {youtube_url}")
 
+def parse_vote_count(vote_text):
+    """
+    Parses vote count text (e.g., "1.2K", "1,234") into an integer.
+    Returns 0 if parsing fails or text is not a valid number format.
+    """
+    if not isinstance(vote_text, str):
+        return 0
+    
+    vote_text = vote_text.strip().lower()
+    if not vote_text:
+        return 0
+
+    num_part = vote_text.split(' ')[0]
+    num_part = num_part.replace(',', '')
+    
+    multiplier = 1
+    if num_part.endswith('k'):
+        multiplier = 1000
+        num_part = num_part[:-1]
+    elif num_part.endswith('m'):
+        multiplier = 1000000
+        num_part = num_part[:-1]
+    elif num_part.endswith('b'):
+        multiplier = 1000000000
+        num_part = num_part[:-1]
+        
+    try:
+        return int(float(num_part) * multiplier)
+    except ValueError:
+        return 0
+
 def get_video_page(video_id):
     """
     Fetches the HTML content of a YouTube video page.
@@ -139,30 +170,41 @@ def extract_comments(comments_data, is_initial=False):
     """
     comments = []
     try:
-        if is_initial:
-            mutations = comments_data['frameworkUpdates']['entityBatchUpdate']['mutations']
+        # The comment data can be in different places depending on the response
+        
+        # Try finding comments in reload/append actions
+        endpoints = comments_data.get('onResponseReceivedEndpoints', [])
+        for endpoint in endpoints:
+            action = endpoint.get('reloadContinuationItemsCommand') or endpoint.get('appendContinuationItemsAction')
+            if action:
+                for item in action.get('continuationItems', []):
+                    if 'commentThreadRenderer' in item:
+                        comment_renderer = item['commentThreadRenderer'].get('comment', {}).get('commentRenderer', {})
+                        if comment_renderer:
+                            text = ''.join(run['text'] for run in comment_renderer.get('contentText', {}).get('runs', []))
+                            votes = comment_renderer.get('voteCount', {}).get('simpleText', '0')
+                            published_time = comment_renderer.get('publishedTimeText', {}).get('runs', [{}])[0].get('text')
+                            comments.append({"text": text, "votes": votes, "published_time": published_time})
+
+        # Try finding comments in framework updates (for initial load)
+        if 'frameworkUpdates' in comments_data and not comments:
+            mutations = comments_data.get('frameworkUpdates', {}).get('entityBatchUpdate', {}).get('mutations', [])
             for mutation in mutations:
                 payload = mutation.get('payload', {})
                 if 'commentEntityPayload' in payload:
                     comment_payload = payload['commentEntityPayload']
-                    content = comment_payload['properties']['content']['content']
-                    votes = comment_payload['toolbar']['likeCountNotliked']
-                    comments.append({"text": content, "votes": votes})
-        else:
-            endpoints = comments_data.get('onResponseReceivedEndpoints', [])
-            if not endpoints:
-                return comments
-            
-            action = endpoints[0].get('reloadContinuationItemsCommand') or endpoints[0].get('appendContinuationItemsAction')
-            if action:
-                for renderer in action.get('continuationItems', []):
-                    if 'commentThreadRenderer' in renderer:
-                        comment = renderer['commentThreadRenderer']['comment']['commentRenderer']
-                        text = ''.join(run['text'] for run in comment['contentText']['runs'])
-                        votes = comment.get('voteCount', {}).get('simpleText', '0')
-                        comments.append({"text": text, "votes": votes})
-    except (KeyError, IndexError) as e:
+                    content = comment_payload.get('properties', {}).get('content', {}).get('content')
+                    votes = comment_payload.get('toolbar', {}).get('likeCountNotliked', '0')
+                    published_time = comment_payload.get('properties', {}).get('publishedTime')
+                    if content:
+                        comments.append({"text": content, "votes": votes, "published_time": published_time})
+
+    except (KeyError, IndexError, TypeError) as e:
         print(f"Error extracting comments: {e}", file=sys.stderr)
+    
+    if not comments and not is_initial:
+         print(f"Could not extract comments from response.", file=sys.stderr)
+
     return comments
 
 def extract_next_continuation_token(comments_data):
@@ -230,7 +272,9 @@ if __name__ == "__main__":
             all_comments = []
             is_initial_fetch = True
             while len(all_comments) < args.results and continuation_token:
-                print(f"Fetching comments... ({len(all_comments)}/{args.results})", file=sys.stderr)
+                if not is_initial_fetch:
+                    print(f"Collected {len(all_comments)} comments, fetching more...", file=sys.stderr)
+                
                 comments_data = fetch_comments(continuation_token)
                 
                 if not comments_data:
@@ -238,22 +282,15 @@ if __name__ == "__main__":
                 
                 if is_initial_fetch:
                     all_comments.extend(extract_comments(comments_data, is_initial=True))
-                    # Save the next response for debugging
-                    try:
-                        with open('comments_next_response.json', 'w', encoding='utf-8') as f:
-                            json.dump(comments_data, f, indent=2, ensure_ascii=False)
-                        print("Saved comments response to comments_next_response.json", file=sys.stderr)
-                    except Exception as e:
-                        print(f"Failed to save comments response: {e}", file=sys.stderr)
                     is_initial_fetch = False
                 else:
-                    all_comments.extend(extract_comments(comments_data))
+                    all_comments.extend(extract_comments(comments_data, is_initial=False))
 
                 continuation_token = extract_next_continuation_token(comments_data)
-                if continuation_token:
-                    print(f"Next continuation token: {continuation_token}", file=sys.stderr)
 
-            print(json.dumps(all_comments[:args.results], indent=2))
+            # Sort comments by votes in descending order
+            sorted_comments = sorted(all_comments, key=lambda c: parse_vote_count(c.get('votes', '0')), reverse=True)
+            print(json.dumps(sorted_comments[:args.results], indent=2, ensure_ascii=False))
         else:
             print("Failed to extract initial continuation token.", file=sys.stderr)
             exit(1)

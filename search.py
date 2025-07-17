@@ -141,13 +141,14 @@ def extract_videos(response_data, exclude_shorts=False):
             title = renderer.get('title', {}).get('runs', [{}])[0].get('text')
             view_count_text = renderer.get('viewCountText', {}).get('simpleText')
             view_count = parse_view_count(view_count_text)
+            published_time_text = renderer.get('publishedTimeText', {}).get('simpleText')
             try:
                 channel_name = renderer['ownerText']['runs'][0]['text']
             except (KeyError, IndexError):
                 channel_name = None
 
             if video_id and title:
-                videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id})
+                videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id, "published_time": published_time_text})
     return videos
 
 def extract_continuation_token(response_data):
