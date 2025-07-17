@@ -61,7 +61,7 @@ def search_youtube_videos(query, continuation=None):
     if continuation:
         payload = {"context": context, "continuation": continuation}
     else:
-        payload = {"context": context, "query": query, "params": "CAM%3D"}
+        payload = {"context": context, "query": query, "params": "CAM%3D", "webSearchboxStatsUrl": f"/search?oq={query.replace(' ', '+') if query else ''}&gs_l=youtube.12.....0.6277......0......................"}
 
     try:
         response = requests.post(url, json=payload, headers=headers)
