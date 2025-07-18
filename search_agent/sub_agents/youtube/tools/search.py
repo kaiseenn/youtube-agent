@@ -1,7 +1,7 @@
 import requests
 import json
-import argparse
 import sys
+from google.adk.tools import FunctionTool
 
 def search_youtube_videos(query, continuation=None):
     """
@@ -147,9 +147,61 @@ def extract_videos(response_data, exclude_shorts=False):
             except (KeyError, IndexError):
                 channel_name = None
 
+            description_snippet = None
+            if 'detailedMetadataSnippets' in renderer:
+                try:
+                    snippet_runs = renderer['detailedMetadataSnippets'][0]['snippetText']['runs']
+                    description_snippet = "".join(run.get('text', '') for run in snippet_runs)
+                except (KeyError, IndexError, TypeError):
+                    pass  # Keep it None if parsing fails
+
             if video_id and title:
-                videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id, "published_time": published_time_text})
+                videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id, "published_time": published_time_text, "description_snippet": description_snippet})
     return videos
+
+def search_youtube(query: str, max_results: int = 10, exclude_shorts: bool = False) -> list:
+    """
+    Performs a YouTube search and returns a list of video results.
+
+    This function queries YouTube's internal API to find videos matching the
+    specified query. It supports pagination to fetch a desired number of results
+    and can optionally filter out YouTube Shorts.
+
+    Args:
+        query (str): The search term to look for on YouTube.
+        max_results (int): The maximum number of video results to return.
+                           Defaults to 10.
+        exclude_shorts (bool): If True, YouTube Shorts will be omitted from the
+                               search results. Defaults to False.
+
+    Returns:
+        list: A list of dictionaries, where each dictionary represents a video
+              and contains the following keys:
+              - 'title' (str): The title of the video.
+              - 'channel_name' (str): The name of the channel that uploaded the video.
+              - 'view_count' (int): The number of views the video has.
+              - 'video_id' (str): The unique identifier for the video.
+              - 'published_time' (str): A human-readable string indicating when
+                                      the video was published (e.g., "2 weeks ago").
+              - 'description_snippet' (str): A short snippet from the video's description.
+    """
+    all_videos = []
+    response_data = search_youtube_videos(query)
+
+    if response_data:
+        all_videos.extend(extract_videos(response_data, exclude_shorts))
+        continuation_token = extract_continuation_token(response_data)
+
+        while len(all_videos) < max_results and continuation_token:
+            response_data = search_youtube_videos(query, continuation=continuation_token)
+            if not response_data:
+                break
+            
+            all_videos.extend(extract_videos(response_data, exclude_shorts))
+            continuation_token = extract_continuation_token(response_data)
+    
+    return all_videos[:max_results]
+
 
 def extract_continuation_token(response_data):
     """
@@ -199,46 +251,7 @@ def parse_filter_renderers(response_data):
                     print(f"  {tooltip}: {status}", file=sys.stderr)
 
     except (KeyError, IndexError, TypeError) as e:
-        print(f"An error occurred while parsing filter renderers: {e}", file=sys.stderr)
+        print(f"An error occurred while parsing filter renderers: {e}", file=sys.stderr) 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Search YouTube videos')
-    parser.add_argument('query', help='Search query')
-    parser.add_argument('--exclude-shorts', action='store_true', help='Exclude YouTube Shorts from the results')
-    parser.add_argument('--results', type=int, default=10, help='Number of results to fetch')
-    args = parser.parse_args()
-    
-    print(f"Searching YouTube for: '{args.query}' | Aiming for {args.results} results.", file=sys.stderr)
-    
-    all_videos = []
-    response_data = search_youtube_videos(args.query)
 
-    if response_data:
-        # Save initial response for debugging
-        try:
-            with open('response.txt', 'w', encoding='utf-8') as f:
-                json.dump(response_data, f, indent=2, ensure_ascii=False)
-            print("Full response from initial search saved to response.txt", file=sys.stderr)
-        except Exception as e:
-            print(f"Failed to save response to file: {e}", file=sys.stderr)
-
-        all_videos.extend(extract_videos(response_data, args.exclude_shorts))
-        continuation_token = extract_continuation_token(response_data)
-        
-        # We no longer print filter information to keep stdout clean for JSON
-        # parse_filter_renderers(response_data)
-
-        while len(all_videos) < args.results and continuation_token:
-            print(f"Collected {len(all_videos)} videos, fetching more...", file=sys.stderr)
-            response_data = search_youtube_videos(args.query, continuation=continuation_token)
-            if not response_data:
-                break
-            
-            all_videos.extend(extract_videos(response_data, args.exclude_shorts))
-            continuation_token = extract_continuation_token(response_data)
-
-        print_videos_info(all_videos[:args.results])
-    else:
-        print("Failed to get search results", file=sys.stderr)
-        
-    exit(0) 
+search = FunctionTool(func=search_youtube)
