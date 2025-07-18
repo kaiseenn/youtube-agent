@@ -1,7 +1,6 @@
 import base64
 import urllib.parse
 import requests
-import json
 import argparse
 import re
 
@@ -54,16 +53,19 @@ def generate_youtube_transcript_params(video_id, asr=True):
     
     return urllib.parse.quote(base64.b64encode(params).decode('ascii'))
 
-def fetch_youtube_transcript_text(video_id, asr=True):
+def fetch_youtube_transcript_text(video_id, asr=True, timestamps=True):
     """
-    Fetch YouTube transcript and return only the text
+    Fetch YouTube transcript and return the text.
     
     Args:
         video_id: YouTube video ID
         asr: Whether to use ASR (auto-generated) transcripts
+        timestamps: Whether to include timestamps in the output
         
     Returns:
-        String containing all transcript text joined together
+        String containing transcript text. If timestamps is True, it will be
+        formatted with timestamps and newlines. Otherwise, it will be a single
+        string of text.
     """
     # Generate params
     params = generate_youtube_transcript_params(video_id, asr=asr)
@@ -158,21 +160,26 @@ def fetch_youtube_transcript_text(video_id, asr=True):
                         start_time = seg_data.get('startTimeText', {}).get('simpleText', '')
                         text = seg_data['snippet']['runs'][0]['text']
                         
-                        # Format as [Time] transcript
-                        if start_time:
-                            formatted_segment = f"[{start_time}] {text}"
+                        if timestamps:
+                            # Format as [Time] transcript
+                            if start_time:
+                                formatted_segment = f"[{start_time}] {text}"
+                            else:
+                                formatted_segment = text
+                            all_text.append(formatted_segment)
                         else:
-                            formatted_segment = text
-                            
-                        all_text.append(formatted_segment)
+                            all_text.append(text.strip())
                 
                 break
                 
     except (KeyError, IndexError) as e:
         raise Exception(f"Failed to parse transcript data: {str(e)}")
     
-    # Join all text with newlines for better readability
-    return '\n'.join(all_text)
+    # Join text based on timestamps flag
+    if timestamps:
+        return '\n'.join(all_text)
+    
+    return ' '.join(all_text)
 
 # Command Line Interface
 if __name__ == "__main__":
@@ -185,18 +192,23 @@ if __name__ == "__main__":
         help='YouTube video URL'
     )
     
+    parser.add_argument(
+        '--timestamp',
+        action='store_true',
+        help='Include timestamps in the output. If not provided, only text is returned.'
+    )
+    
     args = parser.parse_args()
     
     try:
-        # Extract video ID from URL
         video_id = extract_video_id(args.url)
         print(f"Extracting transcript for video ID: {video_id}")
         print(f"Original URL: {args.url}\n")
         
         # Fetch and display transcript
-        text = fetch_youtube_transcript_text(video_id)
+        transcript = fetch_youtube_transcript_text(video_id, timestamps=args.timestamp)
         print("=== TRANSCRIPT ===")
-        print(text)
+        print(transcript)
         exit(0)  # Successful completion
             
     except ValueError as e:
