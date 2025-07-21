@@ -48,6 +48,8 @@ Your workflow should be as follows:
         *   DO NOT use your own format for the guide; you must copy the format found in the video transcripts. If there are multiple formats, decide which one is the best and use that.
         *   Your final output is the combination of the PARTS prompt and this guide, designed to be a complete set of instructions for the teaching agent.
 
+CRITICAL: ONLY RESPOND WITH THE PARTS FRAMEWORK AND THE LEARNING GUIDE. DO NOT RESPOND WITH ANYTHING ELSE.
+
 CRTIICAL: this learning guide will be recieved by ANOTHER AGENT. It must be in a format that is easy to parse and understand. It should be clear and you should not include motivation in the guide (OTHER than the list of motivational comments) since the OTHER agent can handle that. Focus and clarity and conciseness, without losing important information. A student will not be reading this guide, they will recieve a guide from the OTHER agent. Therefore, do not miss any information so assumptions are not made when this guie is sent to the other agent, and then sent to the student.
 ---
 
