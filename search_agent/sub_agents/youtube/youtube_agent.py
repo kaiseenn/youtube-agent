@@ -18,7 +18,7 @@ youtube_agent = LlmAgent(
     planner=BuiltInPlanner(
         thinking_config=types.ThinkingConfig(
             include_thoughts=False,
-            thinking_budget=1024,
+            thinking_budget=0,
         )
     ),
 )
