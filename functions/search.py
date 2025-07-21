@@ -2,6 +2,7 @@ import requests
 import json
 import argparse
 import sys
+from urllib.parse import quote_plus
 
 def search_youtube_videos(query, continuation=None):
     """
@@ -15,6 +16,7 @@ def search_youtube_videos(query, continuation=None):
         The JSON response data from the YouTube API.
     """
     url = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
+    safe_query = quote_plus(query) if query else ''
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
@@ -25,7 +27,7 @@ def search_youtube_videos(query, continuation=None):
         "X-Youtube-Bootstrap-Logged-In": "false",
         "X-Goog-Visitor-Id": "CgtuMGtDeGI1N1AyTSjludXDBjIKCgJDQRIEGgAgQw%3D%3D",
         "Origin": "https://www.youtube.com",
-        "Referer": f"https://www.youtube.com/results?search_query={query.replace(' ', '+') if query else ''}",
+        "Referer": f"https://www.youtube.com/results?search_query={safe_query}",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "same-origin",
         "Sec-Fetch-Dest": "empty",
@@ -40,7 +42,7 @@ def search_youtube_videos(query, continuation=None):
             "visitorData": "CgtuMGtDeGI1N1AyTSjludXDBjIKCgJDQRIEGgAgQw%3D%3D",
             "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36,gzip(gfe)",
             "clientName": "WEB", "clientVersion": "2.20250710.09.00", "osName": "Windows", "osVersion": "10.0",
-            "originalUrl": f"https://www.youtube.com/results?search_query={query.replace(' ', '+') if query else ''}",
+            "originalUrl": f"https://www.youtube.com/results?search_query={safe_query}",
             "platform": "DESKTOP", "clientFormFactor": "UNKNOWN_FORM_FACTOR",
             "userInterfaceTheme": "USER_INTERFACE_THEME_LIGHT", "timeZone": "America/Toronto",
             "browserName": "Chrome", "browserVersion": "138.0.0.0",
@@ -48,7 +50,7 @@ def search_youtube_videos(query, continuation=None):
             "screenWidthPoints": 1247, "screenHeightPoints": 1277, "screenPixelDensity": 1, "screenDensityFloat": 1,
             "utcOffsetMinutes": -240, "memoryTotalKbytes": "8000000",
             "mainAppWebInfo": {
-                "graftUrl": f"/results?search_query={query.replace(' ', '+') if query else ''}",
+                "graftUrl": f"/results?search_query={safe_query}",
                 "pwaInstallabilityStatus": "PWA_INSTALLABILITY_STATUS_UNKNOWN",
                 "webDisplayMode": "WEB_DISPLAY_MODE_BROWSER",
                 "isWebNativeShareAvailable": True
@@ -61,14 +63,14 @@ def search_youtube_videos(query, continuation=None):
     if continuation:
         payload = {"context": context, "continuation": continuation}
     else:
-        payload = {"context": context, "query": query, "params": "CAM%3D", "webSearchboxStatsUrl": f"/search?oq={query.replace(' ', '+') if query else ''}&gs_l=youtube.12.....0.6277......0......................"}
+        payload = {"context": context, "query": query, "params": "CAM%3D", "webSearchboxStatsUrl": f"/search?oq={safe_query}&gs_l=youtube.12.....0.6277......0......................"}
 
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code != 200:
             print(f"Error: HTTP {response.status_code}\nResponse: {response.text}", file=sys.stderr)
             return None
-        return response.json()
+        return response
     except Exception as e:
         print(f"Request failed: {str(e)}", file=sys.stderr)
         return None
@@ -214,14 +216,20 @@ if __name__ == "__main__":
     parser.add_argument('query', help='Search query')
     parser.add_argument('--exclude-shorts', action='store_true', help='Exclude YouTube Shorts from the results')
     parser.add_argument('--results', type=int, default=10, help='Number of results to fetch')
+    parser.add_argument('--dump-raw-response', action='store_true', help='Dumps the raw JSON response from YouTube and exits.')
     args = parser.parse_args()
     
     print(f"Searching YouTube for: '{args.query}' | Aiming for {args.results} results.", file=sys.stderr)
     
     all_videos = []
-    response_data = search_youtube_videos(args.query)
+    response = search_youtube_videos(args.query)
 
-    if response_data:
+    if response:
+        if args.dump_raw_response:
+            print(response.text)
+            exit(0)
+
+        response_data = response.json()
         all_videos.extend(extract_videos(response_data, args.exclude_shorts))
         continuation_token = extract_continuation_token(response_data)
         
@@ -230,10 +238,11 @@ if __name__ == "__main__":
 
         while len(all_videos) < args.results and continuation_token:
             print(f"Collected {len(all_videos)} videos, fetching more...", file=sys.stderr)
-            response_data = search_youtube_videos(args.query, continuation=continuation_token)
-            if not response_data:
+            response = search_youtube_videos(args.query, continuation=continuation_token)
+            if not response:
                 break
             
+            response_data = response.json()
             all_videos.extend(extract_videos(response_data, args.exclude_shorts))
             continuation_token = extract_continuation_token(response_data)
 
