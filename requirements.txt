@@ -1,3 +1,6 @@
 requests
-google-adk
 uvicorn
+langchain
+langchain-google-genai
+langgraph
+python-dotenv
