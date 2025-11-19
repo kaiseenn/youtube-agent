@@ -74,10 +74,8 @@ def get_video_page(video_id):
         if response.status_code == 200:
             return response.text
         else:
-            print(f"Error: HTTP {response.status_code}", file=sys.stderr)
             return None
     except Exception as e:
-        print(f"Request failed: {str(e)}", file=sys.stderr)
         return None
 
 def extract_ytInitialData(html_content):
@@ -89,7 +87,6 @@ def extract_ytInitialData(html_content):
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError as e:
-            print(f"Error decoding ytInitialData JSON: {e}", file=sys.stderr)
             return None
     return None
 
@@ -106,7 +103,6 @@ def extract_comment_token(ytInitialData, newest=False):
                 break
         
         if not comments_panel_renderer:
-            print("Could not find comments section renderer.", file=sys.stderr)
             return None
 
         sort_menu = comments_panel_renderer['header']['engagementPanelTitleHeaderRenderer']['menu']['sortFilterSubMenuRenderer']['subMenuItems']
@@ -116,7 +112,6 @@ def extract_comment_token(ytInitialData, newest=False):
         
         return token_endpoint['serviceEndpoint']['continuationCommand']['token']
     except (KeyError, StopIteration, TypeError, IndexError) as e:
-        print(f"Error extracting comment token: {e}", file=sys.stderr)
         return None
 
 def fetch_comments(continuation_token):
@@ -158,10 +153,8 @@ def fetch_comments(continuation_token):
         if response.status_code == 200:
             return response.json()
         else:
-            print(f"Error fetching comments: HTTP {response.status_code}\n{response.text}", file=sys.stderr)
             return None
     except Exception as e:
-        print(f"Error fetching comments: {e}", file=sys.stderr)
         return None
 
 def extract_comments(comments_data, is_initial=False):
@@ -200,10 +193,7 @@ def extract_comments(comments_data, is_initial=False):
                         comments.append({"text": content, "votes": votes, "published_time": published_time})
 
     except (KeyError, IndexError, TypeError) as e:
-        print(f"Error extracting comments: {e}", file=sys.stderr)
-    
-    if not comments and not is_initial:
-         print(f"Could not extract comments from response.", file=sys.stderr)
+        pass
 
     return comments
 
@@ -230,71 +220,63 @@ def extract_next_continuation_token(comments_data):
                                 return continuation_endpoint['continuationCommand']['token']
 
     except (KeyError, IndexError, TypeError) as e:
-        print(f"Error extracting next continuation token: {e}", file=sys.stderr)
+        pass
     return None
 
-
 # ======================================================================================================================
-# MAIN EXECUTION
+# HIGH-LEVEL FUNCTION FOR EXTERNAL USE
 # ======================================================================================================================
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Get comments from a YouTube video.')
-    parser.add_argument('url', help='The URL of the YouTube video.')
-    parser.add_argument('--newest', action='store_true', help='Get newest comments instead of top comments.')
-    parser.add_argument('--results', type=int, default=20, help='Number of comments to fetch.')
-    args = parser.parse_args()
-
-    try:
-        # Step 1: Extract Video ID from URL
-        video_id = extract_video_id(args.url)
-        print(f"Extracted video ID: {video_id}", file=sys.stderr)
+def get_comments(video_url_or_id, max_comments=20, sort_by_newest=False):
+    """
+    High-level function to get comments from a YouTube video with pagination.
+    
+    Args:
+        video_url_or_id: YouTube URL or video ID
+        max_comments: Number of comments to fetch
+        sort_by_newest: If True, get newest comments; if False, get top comments
         
-        # Step 2: Fetch Video Page
-        html_content = get_video_page(video_id)
-        if not html_content:
-            print("Failed to retrieve video page.", file=sys.stderr)
-            exit(1)
-            
-        # Step 3: Extract Initial Data
-        ytInitialData = extract_ytInitialData(html_content)
-        if not ytInitialData:
-            print("Failed to extract ytInitialData.", file=sys.stderr)
-            exit(1)
-            
-        # Step 4: Get Initial Continuation Token
-        continuation_token = extract_comment_token(ytInitialData, newest=args.newest)
-
-        if continuation_token:
-            print(f"Initial Continuation Token {'(Newest)' if args.newest else '(Top Comments)'} acquired.", file=sys.stderr)
-            
-            # Step 5: Fetch and Extract Comments in a loop
-            all_comments = []
-            is_initial_fetch = True
-            while len(all_comments) < args.results and continuation_token:
-                if not is_initial_fetch:
-                    print(f"Collected {len(all_comments)} comments, fetching more...", file=sys.stderr)
-                
-                comments_data = fetch_comments(continuation_token)
-                
-                if not comments_data:
-                    break
-                
-                if is_initial_fetch:
-                    all_comments.extend(extract_comments(comments_data, is_initial=True))
-                    is_initial_fetch = False
-                else:
-                    all_comments.extend(extract_comments(comments_data, is_initial=False))
-
-                continuation_token = extract_next_continuation_token(comments_data)
-
-            # Sort comments by votes in descending order
-            sorted_comments = sorted(all_comments, key=lambda c: parse_vote_count(c.get('votes', '0')), reverse=True)
-            print(json.dumps(sorted_comments[:args.results], indent=2, ensure_ascii=False))
-        else:
-            print("Failed to extract initial continuation token.", file=sys.stderr)
-            exit(1)
-
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        exit(1)
+    Returns:
+        List of comment dictionaries with keys: text, votes, published_time
+        Returns None on error
+        
+    Raises:
+        ValueError: If video ID cannot be extracted from URL
+    """
+    # Extract video ID if URL was provided
+    if 'youtube.com' in video_url_or_id or 'youtu.be' in video_url_or_id:
+        video_id = extract_video_id(video_url_or_id)
+    else:
+        video_id = video_url_or_id
+    
+    # Step 1: Fetch Video Page
+    html_content = get_video_page(video_id)
+    if not html_content:
+        return None
+        
+    # Step 2: Extract Initial Data
+    ytInitialData = extract_ytInitialData(html_content)
+    if not ytInitialData:
+        return None
+        
+    # Step 3: Get Initial Continuation Token
+    continuation_token = extract_comment_token(ytInitialData, newest=sort_by_newest)
+    if not continuation_token:
+        return None
+    
+    # Step 4: Fetch and Extract Comments in a loop
+    all_comments = []
+    is_initial_fetch = True
+    
+    while len(all_comments) < max_comments and continuation_token:
+        comments_data = fetch_comments(continuation_token)
+        if not comments_data:
+            break
+        
+        all_comments.extend(extract_comments(comments_data, is_initial=is_initial_fetch))
+        continuation_token = extract_next_continuation_token(comments_data)
+        is_initial_fetch = False
+    
+    # Sort comments by votes in descending order
+    sorted_comments = sorted(all_comments, key=lambda c: parse_vote_count(c.get('votes', '0')), reverse=True)
+    return sorted_comments[:max_comments]
