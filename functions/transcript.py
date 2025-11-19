@@ -181,39 +181,35 @@ def fetch_youtube_transcript_text(video_id, asr=True, timestamps=True):
     
     return ' '.join(all_text)
 
-# Command Line Interface
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='Download YouTube transcript text'
-    )
+# ======================================================================================================================
+# HIGH-LEVEL FUNCTION FOR EXTERNAL USE
+# ======================================================================================================================
+
+def get_transcript(video_url_or_id, timestamps=False):
+    """
+    High-level function to get transcript from a YouTube video.
+    Automatically tries ASR first, then falls back to manual transcript.
     
-    parser.add_argument(
-        'url',
-        help='YouTube video URL'
-    )
-    
-    parser.add_argument(
-        '--timestamp',
-        action='store_true',
-        help='Include timestamps in the output. If not provided, only text is returned.'
-    )
-    
-    args = parser.parse_args()
-    
-    try:
-        video_id = extract_video_id(args.url)
-        print(f"Extracting transcript for video ID: {video_id}")
-        print(f"Original URL: {args.url}\n")
+    Args:
+        video_url_or_id: YouTube URL or video ID
+        timestamps: Whether to include timestamps in output
         
-        # Fetch and display transcript
-        transcript = fetch_youtube_transcript_text(video_id, timestamps=args.timestamp)
-        print("=== TRANSCRIPT ===")
-        print(transcript)
-        exit(0)  # Successful completion
-            
-    except ValueError as e:
-        print(f"URL Error: {str(e)}")
-        exit(1)  # Exit with error code for URL issues
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        exit(1)  # Exit with error code for other issues
+    Returns:
+        String containing the transcript text, or None on error
+        
+    Raises:
+        ValueError: If video ID cannot be extracted from URL
+        Exception: If transcript fetching fails
+    """
+    # Extract video ID if URL was provided
+    if 'youtube.com' in video_url_or_id or 'youtu.be' in video_url_or_id:
+        video_id = extract_video_id(video_url_or_id)
+    else:
+        video_id = video_url_or_id
+    
+    # Try ASR (auto-generated) transcript first
+    try:
+        return fetch_youtube_transcript_text(video_id, asr=True, timestamps=timestamps)
+    except Exception:
+        # If ASR fails, try manual transcript
+        return fetch_youtube_transcript_text(video_id, asr=False, timestamps=timestamps)

@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-YouTube Study Assistant - LangChain ReAct Agent
-An autonomous agent that searches YouTube, extracts transcripts, and fetches comments
-to help with studying and research.
-"""
-
 import os
 import sys
 from typing import Optional
@@ -22,30 +16,17 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
-    print("❌ ERROR: GOOGLE_API_KEY not found in environment variables!")
-    print("Please create a .env file with your Google API key:")
-    print("  GOOGLE_API_KEY=your_api_key_here")
-    print("\nGet your API key from: https://makersuite.google.com/app/apikey")
+    print("GOOGLE_API_KEY not found in environment variables!")
     sys.exit(1)
 
 def create_study_assistant():
-    """
-    Creates and configures the YouTube Study Assistant agent with:
-    - Gemini 1.5 Pro model for intelligent reasoning
-    - Three tools: search_youtube, get_transcript, get_comments
-    - Short-term memory to maintain conversation context
-    - ReAct-style reasoning (Thought -> Action -> Observation)
-    """
-    # Initialize Gemini model
+
     model = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=GOOGLE_API_KEY,
-        temperature=0.7
+        temperature=0.7,
+        thinking_budget=-1,
     )
-    
-    print(f"Available tools: {len(TOOLS)}")
-    for tool in TOOLS:
-        print(f"      - {tool.name}: {tool.description.split('.')[0]}")
 
     checkpointer = MemorySaver()
 
@@ -53,23 +34,13 @@ def create_study_assistant():
         model=model,
         tools=TOOLS,
         checkpointer=checkpointer,
+        system_prompt="You have youtube search, transcript, and comment retrieval abilities. Every time a user inquires about a topic, you must first search for at least 10 videos of the topic, then retrieve the trancripts for the videos from the search results that are most relevent, then retrieve comments for the same relevent videos to find tips and tricks, and finally deliver your response based solely on the results of these capabilities."
     )
     
     return agent
 
-
-def print_separator(char="─", length=80):
-    """Print a separator line."""
-    print(char * length)
-
-
 def run_interactive_session():
-    """
-    Main interactive loop for the study assistant.
-    Handles user input, agent execution, and display of results.
-    """
-    
-    # Initialize agent
+
     agent = create_study_assistant()
     
     thread_id = 1
@@ -79,10 +50,9 @@ def run_interactive_session():
             print("You: ", end="", flush=True)
             user_input = input().strip()
             
-            if user_input.lower() in ['clear']:
+            if user_input.lower() == "clear":
                 thread_id += 1
                 print("\n🔄 Starting new conversation (memory cleared)\n")
-                print_separator()
                 print()
                 continue
             
@@ -91,9 +61,7 @@ def run_interactive_session():
             
             # Prepare configuration with thread ID for memory
             config = {"configurable": {"thread_id": thread_id}}
-            
-            print()
-            print_separator("=")
+
             print("Gemini: ",end="")
             
             for token, metadata in agent.stream(
@@ -105,17 +73,14 @@ def run_interactive_session():
                 if not token.content_blocks:
                     continue
                 message = token.content_blocks[0]
-                type = message["type"]
-                if type == "text":
+                type = message.get("type")
+                if type == "text" and metadata.get("langgraph_node") == "model":
                     print(message["text"],end="")
 
                 if type == "tool_call":
                     print("Calling " + message["name"])
-                
-            
-            print_separator("=")
-            print()
         
+            print()
         except Exception as e:
             print(f"\nError: {str(e)}")
             continue
