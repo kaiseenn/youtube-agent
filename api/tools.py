@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 from langchain.tools import tool
 
 from functions.search import search_videos

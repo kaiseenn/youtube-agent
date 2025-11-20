@@ -3,6 +3,60 @@ import urllib.parse
 import requests
 import argparse
 import re
+import psycopg2
+import os
+
+def get_db_connection():
+    """Establish a connection to the local PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(
+            dbname = os.getenv("dbname","searchagent"),
+            user = os.getenv("user"),
+            password = os.getenv("password"),
+            host = os.getenv("host", "localhost"),
+            port = os.getenv("port", "5432")
+        )
+        return conn
+    except psycopg2.Error as e:
+        print(f"Database connection error: {e}")
+        return None
+
+def get_transcript_from_db(video_id):
+    """Retrieve transcript from database."""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT transcript FROM transcripts WHERE id = %s", (video_id,))
+            result = cur.fetchone()
+            return result[0] if result else None
+    except psycopg2.Error as e:
+        print(f"Database read error: {e}")
+        return None
+    finally:
+        conn.close()
+
+def save_transcript_to_db(video_id, transcript_text):
+    """Save transcript to database."""
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    try:
+        with conn.cursor() as cur:
+            
+            cur.execute("""
+                INSERT INTO transcripts (id, transcript)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (video_id, transcript_text))
+            conn.commit()
+    except psycopg2.Error as e:
+        print(f"Database write error: {e}")
+    finally:
+        conn.close()
 
 def extract_video_id(youtube_url):
     """
@@ -53,7 +107,7 @@ def generate_youtube_transcript_params(video_id, asr=True):
     
     return urllib.parse.quote(base64.b64encode(params).decode('ascii'))
 
-def fetch_youtube_transcript_text(video_id, asr=True, timestamps=True):
+def fetch_youtube_transcript_text(video_id, asr=True, timestamps=False):
     """
     Fetch YouTube transcript and return the text.
     
@@ -188,18 +242,14 @@ def fetch_youtube_transcript_text(video_id, asr=True, timestamps=True):
 def get_transcript(video_url_or_id, timestamps=False):
     """
     High-level function to get transcript from a YouTube video.
-    Automatically tries ASR first, then falls back to manual transcript.
+    Checks cached DB first, then fetches from YouTube if missing.
     
     Args:
         video_url_or_id: YouTube URL or video ID
-        timestamps: Whether to include timestamps in output
+        timestamps: Whether to include timestamps in output (default: False)
         
     Returns:
         String containing the transcript text, or None on error
-        
-    Raises:
-        ValueError: If video ID cannot be extracted from URL
-        Exception: If transcript fetching fails
     """
     # Extract video ID if URL was provided
     if 'youtube.com' in video_url_or_id or 'youtu.be' in video_url_or_id:
@@ -207,9 +257,21 @@ def get_transcript(video_url_or_id, timestamps=False):
     else:
         video_id = video_url_or_id
     
-    # Try ASR (auto-generated) transcript first
+    cached_transcript = get_transcript_from_db(video_id)
+    if cached_transcript:
+        return cached_transcript
+    
+    transcript_text = None
     try:
-        return fetch_youtube_transcript_text(video_id, asr=True, timestamps=timestamps)
+        transcript_text = fetch_youtube_transcript_text(video_id, asr=True, timestamps=timestamps)
     except Exception:
-        # If ASR fails, try manual transcript
-        return fetch_youtube_transcript_text(video_id, asr=False, timestamps=timestamps)
+        try:
+            transcript_text = fetch_youtube_transcript_text(video_id, asr=False, timestamps=timestamps)
+        except Exception as e:
+            return "Error: " + e
+            
+    # 3. SAVE TO DB
+    if transcript_text:
+        save_transcript_to_db(video_id, transcript_text)
+        
+    return transcript_text
