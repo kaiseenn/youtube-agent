@@ -1,6 +1,9 @@
 requests
+fastapi
+fastapi[standard]
 uvicorn
 langchain
 langchain-google-genai
 langgraph
 python-dotenv
+psycopg2-binary

@@ -1,0 +1,150 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f5f5f5;
+  color: #333;
+  line-height: 1.5;
+}
+
+.app-container {
+  display: flex;
+  justify-content: center;
+  height: 100vh;
+  padding: 20px;
+}
+
+.chat-wrapper {
+  width: 100%;
+  max-width: 700px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  height: 100%;
+  max-height: 900px; /* Prevent it from being too tall on huge screens */
+}
+
+.chat-header {
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+}
+
+.chat-header h1 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.messages-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.empty-state {
+  text-align: center;
+  color: #999;
+  margin-top: 40px;
+  font-style: italic;
+}
+
+.message-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.message-sender {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 2px;
+}
+
+.message-item.user .message-sender {
+  color: #0066cc;
+}
+
+.message-item.ai .message-sender {
+  color: #008000;
+}
+
+.message-text {
+  font-size: 1rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: #111;
+}
+
+.input-area {
+  padding: 20px;
+  border-top: 1px solid #eee;
+  display: flex;
+  gap: 10px;
+  background: #fff;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-area input:focus {
+  border-color: #0066cc;
+}
+
+.input-area button {
+  padding: 0 24px;
+  font-size: 1rem;
+  background-color: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.input-area button:hover:not(:disabled) {
+  background-color: #0052a3;
+}
+
+.input-area button:disabled {
+  background-color: #ccc;
+  cursor: default;
+}
+
+/* Simple Scrollbar */
+.messages-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.messages-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages-list::-webkit-scrollbar-thumb {
+  background-color: #ddd;
+  border-radius: 4px;
+}
+
+.messages-list::-webkit-scrollbar-thumb:hover {
+  background-color: #ccc;
+}
