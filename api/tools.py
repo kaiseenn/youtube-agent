@@ -31,16 +31,17 @@ def search_youtube(query: str, max_results: int = 10, exclude_shorts: bool = Tru
         videos = search_videos(query, max_results=max_results, exclude_shorts=exclude_shorts)
         
         if videos is None:
-            return json.dumps({"error": "Failed to get search results from YouTube API"})
-        
-
+            return json.dumps({"message": "No videos found for the query", "results": []})
         
         # Return as JSON string for LLM to parse
         return json.dumps(videos, indent=2, ensure_ascii=False)
         
-    except Exception as e:
+    except (ValueError, ConnectionError, RuntimeError) as e:
         error_msg = f"Error searching YouTube: {str(e)}"
-
+        return json.dumps({"error": error_msg})
+    
+    except Exception as e:
+        error_msg = f"Unexpected error searching YouTube: {str(e)}"
         return json.dumps({"error": error_msg})
 
 
@@ -68,17 +69,25 @@ def get_transcript(video_url_or_id: str, include_timestamps: bool = False) -> st
         # Call the high-level transcript function
         transcript = get_transcript_function(video_url_or_id, timestamps=include_timestamps)
         
-
+        if transcript is None:
+            return "ERROR: Transcript is not available for this video (may be disabled or not yet generated)"
+        
         return transcript
     
     except ValueError as e:
-        error_msg = f"Invalid video URL or ID: {str(e)}"
-
+        error_msg = f"Invalid video URL or parsing error: {str(e)}"
+        return f"ERROR: {error_msg}"
+    
+    except ConnectionError as e:
+        error_msg = f"Network error while fetching transcript: {str(e)}"
+        return f"ERROR: {error_msg}"
+    
+    except RuntimeError as e:
+        error_msg = f"Unexpected error fetching transcript: {str(e)}"
         return f"ERROR: {error_msg}"
     
     except Exception as e:
-        error_msg = f"Error fetching transcript: {str(e)}"
-
+        error_msg = f"Unknown error fetching transcript: {str(e)}"
         return f"ERROR: {error_msg}"
 
 
@@ -111,16 +120,24 @@ def get_comments(video_url_or_id: str, max_comments: int = 10, sort_by_newest: b
         comments = get_comments_function(video_url_or_id, max_comments=max_comments, sort_by_newest=sort_by_newest)
         
         if comments is None:
-            return json.dumps({"error": "Failed to retrieve comments or comments may be disabled"})
+            return json.dumps({"message": "Comments are disabled or unavailable for this video", "comments": []})
         
         return json.dumps(comments, indent=2, ensure_ascii=False)
     
     except ValueError as e:
-        error_msg = f"Invalid video URL or ID: {str(e)}"
+        error_msg = f"Invalid video URL or parsing error: {str(e)}"
+        return json.dumps({"error": error_msg})
+    
+    except ConnectionError as e:
+        error_msg = f"Network error while fetching comments: {str(e)}"
+        return json.dumps({"error": error_msg})
+    
+    except RuntimeError as e:
+        error_msg = f"Unexpected error fetching comments: {str(e)}"
         return json.dumps({"error": error_msg})
     
     except Exception as e:
-        error_msg = f"Error fetching comments: {str(e)}"
+        error_msg = f"Unknown error fetching comments: {str(e)}"
         return json.dumps({"error": error_msg})
 
 TOOLS = [search_youtube, get_transcript, get_comments]
