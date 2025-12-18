@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import sys
-from typing import Optional
 from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -12,7 +11,6 @@ from langchain_core.messages import HumanMessage
 from tools import TOOLS
 load_dotenv()
 
-# Get API key from environment
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:

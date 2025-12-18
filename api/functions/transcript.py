@@ -21,9 +21,8 @@ def get_db_connection():
         print(f"Database connection error: {e}")
         return None
 
-def get_transcript_from_db(video_id):
+def get_transcript_from_db(conn, video_id):
     """Retrieve transcript from database."""
-    conn = get_db_connection()
     if not conn:
         return None
     
@@ -35,18 +34,14 @@ def get_transcript_from_db(video_id):
     except psycopg2.Error as e:
         print(f"Database read error: {e}")
         return None
-    finally:
-        conn.close()
 
-def save_transcript_to_db(video_id, transcript_text):
+def save_transcript_to_db(conn, video_id, transcript_text):
     """Save transcript to database."""
-    conn = get_db_connection()
     if not conn:
         return
 
     try:
         with conn.cursor() as cur:
-            
             cur.execute("""
                 INSERT INTO transcripts (id, transcript)
                 VALUES (%s, %s)
@@ -55,8 +50,6 @@ def save_transcript_to_db(video_id, transcript_text):
             conn.commit()
     except psycopg2.Error as e:
         print(f"Database write error: {e}")
-    finally:
-        conn.close()
 
 def extract_video_id(youtube_url):
     """
@@ -243,13 +236,6 @@ def get_transcript(video_url_or_id, timestamps=False):
     """
     High-level function to get transcript from a YouTube video.
     Checks cached DB first, then fetches from YouTube if missing.
-    
-    Args:
-        video_url_or_id: YouTube URL or video ID
-        timestamps: Whether to include timestamps in output (default: False)
-        
-    Returns:
-        String containing the transcript text, or None on error
     """
     # Extract video ID if URL was provided
     if 'youtube.com' in video_url_or_id or 'youtu.be' in video_url_or_id:
@@ -257,21 +243,49 @@ def get_transcript(video_url_or_id, timestamps=False):
     else:
         video_id = video_url_or_id
     
-    cached_transcript = get_transcript_from_db(video_id)
-    if cached_transcript:
-        return cached_transcript
+    # Get DB connection at start
+    conn = get_db_connection()
     
-    transcript_text = None
     try:
-        transcript_text = fetch_youtube_transcript_text(video_id, asr=True, timestamps=timestamps)
-    except Exception:
-        try:
-            transcript_text = fetch_youtube_transcript_text(video_id, asr=False, timestamps=timestamps)
-        except Exception as e:
-            return "Error: " + e
-            
-    # 3. SAVE TO DB
-    if transcript_text:
-        save_transcript_to_db(video_id, transcript_text)
+        # Check cached transcript only if DB connection exists
+        if conn:
+            cached_transcript = get_transcript_from_db(conn, video_id)
+            if cached_transcript:
+                return cached_transcript
         
-    return transcript_text
+        # Fetch transcript from YouTube
+        transcript_text = None
+        try:
+            transcript_text = fetch_youtube_transcript_text(video_id, asr=True, timestamps=timestamps)
+            print(f"no-db: Transcript fetched for video {video_id}")
+        except Exception:
+            try:
+                transcript_text = fetch_youtube_transcript_text(video_id, asr=False, timestamps=timestamps)
+            except Exception as e:
+                print(f"no-db: Error fetching transcript for video {video_id}: {str(e)}")
+                return "Error: " + str(e)
+        
+        # Save to DB only if connection available and transcript fetched
+        if conn and transcript_text:
+            save_transcript_to_db(conn, video_id, transcript_text)
+            
+        return transcript_text
+    
+    finally:
+        # Close connection at end
+        if conn:
+            conn.close()
+
+# ======================================================================================================================
+# CLI INTERFACE
+# ======================================================================================================================
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch YouTube transcript")
+    parser.add_argument("video", help="YouTube video URL or ID")
+    parser.add_argument("--timestamps", action="store_true", help="Include timestamps in output")
+    
+    args = parser.parse_args()
+    
+    result = get_transcript(args.video, timestamps=args.timestamps)
+    print(result)
