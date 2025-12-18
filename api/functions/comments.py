@@ -4,15 +4,13 @@ import json
 import argparse
 import sys
 import re
+from typing import Optional
 
 # ======================================================================================================================
 # CORE FUNCTIONS
 # ======================================================================================================================
 
-def extract_video_id(youtube_url):
-    """
-    Extract video ID from various YouTube URL formats.
-    """
+def extract_video_id(youtube_url: str) -> str:
     patterns = [
         r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
         r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
@@ -25,11 +23,7 @@ def extract_video_id(youtube_url):
             return match.group(1)
     raise ValueError(f"Could not extract video ID from URL: {youtube_url}")
 
-def parse_vote_count(vote_text):
-    """
-    Parses vote count text (e.g., "1.2K", "1,234") into an integer.
-    Returns 0 if parsing fails or text is not a valid number format.
-    """
+def parse_vote_count(vote_text: str) -> int:
     if not isinstance(vote_text, str):
         return 0
     
@@ -56,10 +50,7 @@ def parse_vote_count(vote_text):
     except ValueError:
         return 0
 
-def get_video_page(video_id):
-    """
-    Fetches the HTML content of a YouTube video page.
-    """
+def get_video_page(video_id: str) -> str:
     url = f"https://www.youtube.com/watch?v={video_id}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
@@ -74,28 +65,26 @@ def get_video_page(video_id):
         if response.status_code == 200:
             return response.text
         else:
-            return None
-    except Exception as e:
-        return None
+            raise ValueError(f"Failed to fetch video page: HTTP {response.status_code}")
+    except requests.RequestException as e:
+        raise ConnectionError(f"Network error while fetching video page: {str(e)}")
 
-def extract_ytInitialData(html_content):
-    """
-    Parses the ytInitialData JSON from the video page's HTML.
-    """
+def extract_ytInitialData(html_content: str) -> dict:
     match = re.search(r'var ytInitialData = (\{.*?\});', html_content)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError as e:
-            return None
-    return None
-
-def extract_comment_token(ytInitialData, newest=False):
-    """
-    Extracts the continuation token for comments from ytInitialData.
-    """
+    if not match:
+        raise ValueError("Could not find ytInitialData in page HTML")
+    
     try:
-        engagement_panels = ytInitialData['engagementPanels']
+        return json.loads(match.group(1))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse ytInitialData JSON: {str(e)}")
+
+def extract_comment_token(ytInitialData: dict, newest: bool = False) -> Optional[str]:
+    try:
+        engagement_panels = ytInitialData.get('engagementPanels')
+        if not engagement_panels:
+            return None
+            
         comments_panel_renderer = None
         for panel in engagement_panels:
             if panel.get('engagementPanelSectionListRenderer', {}).get('panelIdentifier') == 'engagement-panel-comments-section':
@@ -112,12 +101,9 @@ def extract_comment_token(ytInitialData, newest=False):
         
         return token_endpoint['serviceEndpoint']['continuationCommand']['token']
     except (KeyError, StopIteration, TypeError, IndexError) as e:
-        return None
+        raise ValueError(f"Failed to extract comment token due to unexpected page structure: {str(e)}")
 
-def fetch_comments(continuation_token):
-    """
-    Fetches comments using the continuation token.
-    """
+def fetch_comments(continuation_token: str) -> dict:
     url = "https://www.youtube.com/youtubei/v1/next?prettyPrint=false"
     headers = {
         "Content-Type": "application/json",
@@ -153,19 +139,13 @@ def fetch_comments(continuation_token):
         if response.status_code == 200:
             return response.json()
         else:
-            return None
-    except Exception as e:
-        return None
+            raise ValueError(f"Failed to fetch comments: HTTP {response.status_code}")
+    except requests.RequestException as e:
+        raise ConnectionError(f"Network error while fetching comments: {str(e)}")
 
-def extract_comments(comments_data, is_initial=False):
-    """
-    Extracts comment details from the comments data.
-    """
+def extract_comments(comments_data: dict, is_initial: bool = False) -> list[dict]:
     comments = []
     try:
-        # The comment data can be in different places depending on the response
-        
-        # Try finding comments in reload/append actions
         endpoints = comments_data.get('onResponseReceivedEndpoints', [])
         for endpoint in endpoints:
             action = endpoint.get('reloadContinuationItemsCommand') or endpoint.get('appendContinuationItemsAction')
@@ -179,7 +159,6 @@ def extract_comments(comments_data, is_initial=False):
                             published_time = comment_renderer.get('publishedTimeText', {}).get('runs', [{}])[0].get('text')
                             comments.append({"text": text, "votes": votes, "published_time": published_time})
 
-        # Try finding comments in framework updates (for initial load)
         if 'frameworkUpdates' in comments_data and not comments:
             mutations = comments_data.get('frameworkUpdates', {}).get('entityBatchUpdate', {}).get('mutations', [])
             for mutation in mutations:
@@ -197,10 +176,7 @@ def extract_comments(comments_data, is_initial=False):
 
     return comments
 
-def extract_next_continuation_token(comments_data):
-    """
-    Extracts the next continuation token from a comments response.
-    """
+def extract_next_continuation_token(comments_data: dict) -> Optional[str]:
     try:
         endpoints = comments_data.get('onResponseReceivedEndpoints', [])
         if not endpoints:
@@ -227,56 +203,32 @@ def extract_next_continuation_token(comments_data):
 # HIGH-LEVEL FUNCTION FOR EXTERNAL USE
 # ======================================================================================================================
 
-def get_comments(video_url_or_id, max_comments=20, sort_by_newest=False):
-    """
-    High-level function to get comments from a YouTube video with pagination.
-    
-    Args:
-        video_url_or_id: YouTube URL or video ID
-        max_comments: Number of comments to fetch
-        sort_by_newest: If True, get newest comments; if False, get top comments
-        
-    Returns:
-        List of comment dictionaries with keys: text, votes, published_time
-        Returns None on error
-        
-    Raises:
-        ValueError: If video ID cannot be extracted from URL
-    """
-    # Extract video ID if URL was provided
+def get_comments(video_url_or_id: str, max_comments: int = 20, sort_by_newest: bool = False) -> Optional[list[dict]]:
     if 'youtube.com' in video_url_or_id or 'youtu.be' in video_url_or_id:
         video_id = extract_video_id(video_url_or_id)
     else:
         video_id = video_url_or_id
     
-    # Step 1: Fetch Video Page
-    html_content = get_video_page(video_id)
-    if not html_content:
-        return None
+    try:
+        html_content = get_video_page(video_id)
+        ytInitialData = extract_ytInitialData(html_content)
+        continuation_token = extract_comment_token(ytInitialData, newest=sort_by_newest)
+        if not continuation_token:
+            return None
         
-    # Step 2: Extract Initial Data
-    ytInitialData = extract_ytInitialData(html_content)
-    if not ytInitialData:
-        return None
+        all_comments = []
+        is_initial_fetch = True
         
-    # Step 3: Get Initial Continuation Token
-    continuation_token = extract_comment_token(ytInitialData, newest=sort_by_newest)
-    if not continuation_token:
-        return None
-    
-    # Step 4: Fetch and Extract Comments in a loop
-    all_comments = []
-    is_initial_fetch = True
-    
-    while len(all_comments) < max_comments and continuation_token:
-        comments_data = fetch_comments(continuation_token)
-        if not comments_data:
-            break
+        while len(all_comments) < max_comments and continuation_token:
+            comments_data = fetch_comments(continuation_token)
+            
+            all_comments.extend(extract_comments(comments_data, is_initial=is_initial_fetch))
+            continuation_token = extract_next_continuation_token(comments_data)
+            is_initial_fetch = False
         
-        all_comments.extend(extract_comments(comments_data, is_initial=is_initial_fetch))
-        continuation_token = extract_next_continuation_token(comments_data)
-        is_initial_fetch = False
-    
-    # Sort comments by votes in descending order
-    sorted_comments = sorted(all_comments, key=lambda c: parse_vote_count(c.get('votes', '0')), reverse=True)
-    return sorted_comments[:max_comments]
+        sorted_comments = sorted(all_comments, key=lambda c: parse_vote_count(c.get('votes', '0')), reverse=True)
+        return sorted_comments[:max_comments]
+    except (ValueError, ConnectionError):
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error while fetching comments: {str(e)}")

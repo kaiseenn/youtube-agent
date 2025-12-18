@@ -2,19 +2,10 @@ import requests
 import json
 import argparse
 import sys
+from typing import Optional
 from urllib.parse import quote_plus
 
-def search_youtube_videos(query, continuation=None):
-    """
-    Search YouTube videos using the internal API. Can be used for an initial search or for pagination.
-
-    Args:
-        query: The search query string for the initial search.
-        continuation: The continuation token for fetching subsequent pages.
-
-    Returns:
-        The JSON response data from the YouTube API.
-    """
+def search_youtube_videos(query: str, continuation: Optional[str] = None) -> requests.Response:
     url = "https://www.youtube.com/youtubei/v1/search?prettyPrint=false"
     safe_query = quote_plus(query) if query else ''
     headers = {
@@ -68,23 +59,18 @@ def search_youtube_videos(query, continuation=None):
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code != 200:
-            return None
+            raise ValueError(f"YouTube search API returned status code {response.status_code}")
         return response
-    except Exception as e:
-        return None
+    except requests.RequestException as e:
+        raise ConnectionError(f"Network error while searching YouTube: {str(e)}")
 
-def parse_view_count(vc_text):
-    """
-    Parses view count text (e.g., "1.2M views", "1,234 views", "No views") into an integer.
-    """
+def parse_view_count(vc_text: str) -> Optional[int]:
     if not vc_text:
         return None
     
-    # "No views" case
     if vc_text.lower().startswith("no"):
         return 0
     
-    # Take first part which should be the number
     num_part = vc_text.split(' ')[0]
     num_part = num_part.replace(',', '')
     
@@ -104,10 +90,7 @@ def parse_view_count(vc_text):
     except ValueError:
         return None
 
-def extract_videos(response_data, exclude_shorts=False):
-    """
-    Extracts video details from a YouTube search response.
-    """
+def extract_videos(response_data: dict, exclude_shorts: bool = False) -> list[dict]:
     videos = []
     try:
         contents = response_data['onResponseReceivedCommands'][0]['appendContinuationItemsAction']['continuationItems']
@@ -122,7 +105,7 @@ def extract_videos(response_data, exclude_shorts=False):
         if 'itemSectionRenderer' in item:
             video_contents.extend(item['itemSectionRenderer']['contents'])
         elif 'continuationItemRenderer' in item:
-            pass  # This is handled by extract_continuation_token
+            pass
 
     for item in video_contents:
         if 'videoRenderer' in item:
@@ -152,21 +135,16 @@ def extract_videos(response_data, exclude_shorts=False):
                     snippet_runs = renderer['detailedMetadataSnippets'][0]['snippetText']['runs']
                     description_snippet = "".join(run.get('text', '') for run in snippet_runs)
                 except (KeyError, IndexError, TypeError):
-                    pass  # Keep it None if parsing fails
+                    pass
 
             if video_id and title:
                 videos.append({"title": title, "channel_name": channel_name, "view_count": view_count, "video_id": video_id, "published_time": published_time_text, "description_snippet": description_snippet})
     return videos
 
-def extract_continuation_token(response_data):
-    """
-    Extracts the continuation token from a YouTube search response.
-    """
+def extract_continuation_token(response_data: dict) -> Optional[str]:
     try:
-        # For initial response
         contents = response_data['contents']['twoColumnSearchResultsRenderer']['primaryContents']['sectionListRenderer']['contents']
     except KeyError:
-        # For continuation responses
         try:
             contents = response_data['onResponseReceivedCommands'][0]['appendContinuationItemsAction']['continuationItems']
         except (KeyError, IndexError):
@@ -180,10 +158,7 @@ def extract_continuation_token(response_data):
                 continue
     return None
 
-def parse_filter_renderers(response_data):
-    """
-    Parses searchFilterRenderer objects from the YouTube search response.
-    """
+def parse_filter_renderers(response_data: dict) -> Optional[list[dict]]:
     try:
         groups = response_data['header']['searchHeaderRenderer']['searchFilterButton']['buttonRenderer']['command']['openPopupAction']['popup']['searchFilterOptionsDialogRenderer']['groups']
         filters_info = []
@@ -206,37 +181,27 @@ def parse_filter_renderers(response_data):
 # HIGH-LEVEL FUNCTION FOR EXTERNAL USE
 # ======================================================================================================================
 
-def search_videos(query, max_results=10, exclude_shorts=False):
-    """
-    High-level function to search YouTube videos with pagination.
-    Returns a list of video dictionaries or None on error.
-    
-    Args:
-        query: Search query string
-        max_results: Number of results to fetch
-        exclude_shorts: Whether to exclude YouTube Shorts
-        
-    Returns:
-        List of video dictionaries with keys: title, channel_name, view_count, video_id, published_time, description_snippet
-        Returns None on error
-    """
-    all_videos = []
-    response = search_youtube_videos(query)
-
-    if not response:
-        return None
-        
-    response_data = response.json()
-    all_videos.extend(extract_videos(response_data, exclude_shorts))
-    continuation_token = extract_continuation_token(response_data)
-
-    while len(all_videos) < max_results and continuation_token:
-        response = search_youtube_videos(query, continuation=continuation_token)
-        if not response:
-            break
-        
+def search_videos(query: str, max_results: int = 10, exclude_shorts: bool = False) -> Optional[list[dict]]:
+    try:
+        all_videos = []
+        response = search_youtube_videos(query)
+            
         response_data = response.json()
         all_videos.extend(extract_videos(response_data, exclude_shorts))
         continuation_token = extract_continuation_token(response_data)
 
-    return all_videos[:max_results]
+        while len(all_videos) < max_results and continuation_token:
+            response = search_youtube_videos(query, continuation=continuation_token)
+            
+            response_data = response.json()
+            all_videos.extend(extract_videos(response_data, exclude_shorts))
+            continuation_token = extract_continuation_token(response_data)
+
+        if len(all_videos) == 0:
+            return None
+            
+        return all_videos[:max_results]
+    except (ValueError, ConnectionError):
+        raise
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error while searching videos: {str(e)}")

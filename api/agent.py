@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+from typing import Any
 from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -17,8 +18,7 @@ if not GOOGLE_API_KEY:
     print("GOOGLE_API_KEY not found in environment variables!")
     sys.exit(1)
 
-def initialize_agent():
-
+def initialize_agent() -> Any:
     model = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=GOOGLE_API_KEY,
@@ -36,64 +36,3 @@ def initialize_agent():
     )
     
     return agent
-
-def run_interactive_session():
-
-    agent = initialize_agent()
-    
-    thread_id = 1
-    while True:
-        try:
-            # Get user input
-            print("You: ", end="", flush=True)
-            user_input = input().strip()
-            
-            if user_input.lower() == "clear":
-                thread_id += 1
-                print("\n🔄 Starting new conversation (memory cleared)\n")
-                print()
-                continue
-            
-            if not user_input:
-                continue
-            
-            # Prepare configuration with thread ID for memory
-            config = {"configurable": {"thread_id": thread_id}}
-
-            print("Gemini: ",end="")
-            
-            for token, metadata in agent.stream(
-                {"messages": [HumanMessage(content=user_input)]},
-                config=config,
-                stream_mode="messages"
-            ):
-                # Get the latest message
-                if not token.content_blocks:
-                    continue
-                for message in token.content_blocks:
-                    type = message.get("type")
-                    if type == "text" and metadata.get("langgraph_node") == "model":
-                        print(message["text"],end="")
-
-                    if type == "tool_call":
-                        print("Calling " + message["name"] + " with " + str(message["args"]))
-        
-            print()
-        except Exception as e:
-            print(f"\nError: {str(e)}")
-            continue
-
-
-# ======================================================================================================================
-# MAIN ENTRY POINT
-# ======================================================================================================================
-
-if __name__ == "__main__":
-    try:
-        run_interactive_session()
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        print(f"\nFatal error: {str(e)}")
-        sys.exit(1)
-

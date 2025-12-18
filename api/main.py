@@ -11,9 +11,9 @@ from agent import initialize_agent
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["OPTIONS", "POST"],
     allow_headers=["*"],
     )
 
@@ -25,7 +25,6 @@ class MessageRequest(BaseModel):
 
 async def generate_response(user_message: str) -> AsyncGenerator[str, None]:
     global agent, thread_id
-    
     config = {"configurable": {"thread_id": thread_id}}
     
     try:
@@ -48,14 +47,14 @@ async def generate_response(user_message: str) -> AsyncGenerator[str, None]:
         yield f"\n[Error: {str(e)}]\n"
 
 @app.post("/chat")
-async def chat(request: MessageRequest):
+async def chat(request: MessageRequest) -> StreamingResponse:
     return StreamingResponse(
         generate_response(request.message),
         media_type="text/plain"
     )
 
 @app.post("/clear")
-async def clear_conversation():
+async def clear_conversation() -> dict[str, str]:
     global thread_id
     thread_id += 1
     return {"status": "cleared"}
